@@ -1,87 +1,45 @@
 #!/bin/bash
 
-# This script sets up the V2Ray GUI project and installs all necessary components
+# Enhanced V2Ray GUI Setup Script
+# This script installs, configures, and deploys a V2Ray GUI management system.
 
-# Constants
-REPO_URL="https://github.com/mrbtmn/v2ray-gui.git"
+# Variables
 INSTALL_DIR="/opt/v2ray_gui"
-PYTHON_BIN="python3"
-PIP_BIN="pip3"
+REPO_URL="https://github.com/mrbtmn/v2ray-gui.git"
 SERVICE_FILE="/etc/systemd/system/v2ray_gui.service"
+USERS_FILE="$INSTALL_DIR/users.json"
+PYTHON_BIN=$(command -v python3)
+PIP_BIN=$(command -v pip3)
 
-# Ensure the script is run as root
+# Ensure script is run as root
 if [ "$EUID" -ne 0 ]; then
-    echo "Please run as root."
+    echo "Please run this script as root."
     exit 1
 fi
 
-# Install prerequisites
+# Function to install prerequisites
 install_prerequisites() {
     echo "Installing prerequisites..."
-    apt update -y
-    apt install -y git $PYTHON_BIN $PIP_BIN nginx
-    $PIP_BIN install flask
+    apt update -y && apt install -y git $PYTHON_BIN $PIP_BIN nginx
+    $PIP_BIN install flask || { echo "Failed to install Flask!"; exit 1; }
+    echo "Prerequisites installed."
 }
 
-# Clone the repository
-clone_repo() {
-    if [ ! -d "$INSTALL_DIR" ]; then
-        echo "Cloning repository..."
-        git clone "$REPO_URL" "$INSTALL_DIR"
+# Function to set up the application directory
+setup_application() {
+    echo "Setting up application directory..."
+    mkdir -p "$INSTALL_DIR"
+    if [ -d "$INSTALL_DIR" ]; then
+        echo "Application directory created."
     else
-        echo "Repository already cloned."
+        echo "Failed to create application directory!"
+        exit 1
     fi
 }
 
-# Create the systemd service
-create_service() {
-    echo "Creating systemd service..."
-    cat > "$SERVICE_FILE" <<EOF
-[Unit]
-Description=V2Ray GUI Backend
-After=network.target
-
-[Service]
-User=root
-WorkingDirectory=$INSTALL_DIR
-ExecStart=/usr/bin/python3 $INSTALL_DIR/app.py
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    systemctl daemon-reload
-    systemctl enable v2ray_gui
-    systemctl start v2ray_gui
-    echo "Service created and started."
-}
-
-# Configure Nginx (optional, for reverse proxy)
-configure_nginx() {
-    echo "Configuring Nginx..."
-    cat > /etc/nginx/sites-available/v2ray_gui <<EOF
-server {
-    listen 80;
-
-    location / {
-        proxy_pass http://127.0.0.1:5000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    }
-}
-EOF
-
-    ln -sf /etc/nginx/sites-available/v2ray_gui /etc/nginx/sites-enabled/v2ray_gui
-    systemctl restart nginx
-    echo "Nginx configured. Access the GUI via http://<server-ip>."
-}
-
-# Generate Flask App (Backend)
-generate_flask_app() {
-    echo "Generating Flask backend..."
-    mkdir -p "$INSTALL_DIR"
+# Function to generate the backend Flask app
+generate_backend() {
+    echo "Generating backend Flask application..."
     cat > "$INSTALL_DIR/app.py" <<EOF
 from flask import Flask, jsonify, request
 import uuid
@@ -90,7 +48,7 @@ import json
 app = Flask(__name__)
 USERS_FILE = "users.json"
 
-# Load users
+# Helper functions
 def load_users():
     try:
         with open(USERS_FILE, "r") as file:
@@ -98,14 +56,9 @@ def load_users():
     except FileNotFoundError:
         return []
 
-# Save users
 def save_users(users):
     with open(USERS_FILE, "w") as file:
         json.dump(users, file, indent=4)
-
-# Generate unique path
-def generate_unique_path():
-    return f"/{uuid.uuid4().hex[:8]}"
 
 @app.route("/api/users", methods=["GET"])
 def list_users():
@@ -120,13 +73,13 @@ def add_user():
         return jsonify({"error": "Name and domain are required"}), 400
 
     user_uuid = str(uuid.uuid4())
-    unique_path = generate_unique_path()
+    unique_path = f"/{uuid.uuid4().hex[:8]}"
     vless_link = (
         f"vless://{user_uuid}@{domain}:2053?"
         f"encryption=none&security=tls&sni={domain}&type=ws&host={domain}"
         f"&path={unique_path}%3Fed%3D2560#{name}"
     )
-    
+
     users = load_users()
     user = {"name": name, "uuid": user_uuid, "path": unique_path, "vless_link": vless_link}
     users.append(user)
@@ -144,10 +97,11 @@ def delete_user(identifier):
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
 EOF
-    echo "Flask backend generated."
+
+    echo "Backend Flask application generated."
 }
 
-# Generate Frontend (Static Files)
+# Function to generate the frontend
 generate_frontend() {
     echo "Generating frontend..."
     mkdir -p "$INSTALL_DIR/static"
@@ -164,19 +118,19 @@ generate_frontend() {
             userList.innerHTML = '';
             users.forEach(user => {
                 const listItem = document.createElement('li');
-                listItem.innerHTML = `
-                    <strong>${user.name}</strong><br>
-                    UUID: ${user.uuid}<br>
-                    Path: ${user.path}<br>
-                    VLESS Link: <a href="${user.vless_link}" target="_blank">${user.vless_link}</a><br>
-                    <button onclick="deleteUser('${user.uuid}')">Delete</button>
-                `;
+                listItem.innerHTML = \`
+                    <strong>\${user.name}</strong><br>
+                    UUID: \${user.uuid}<br>
+                    Path: \${user.path}<br>
+                    VLESS Link: <a href="\${user.vless_link}" target="_blank">\${user.vless_link}</a><br>
+                    <button onclick="deleteUser('\${user.uuid}')">Delete</button>
+                \`;
                 userList.appendChild(listItem);
             });
         }
 
         async function deleteUser(uuid) {
-            await fetch(`/api/delete-user/${uuid}`, { method: 'DELETE' });
+            await fetch(\`/api/delete-user/\${uuid}\`, { method: 'DELETE' });
             loadUsers();
         }
 
@@ -206,13 +160,58 @@ EOF
     echo "Frontend generated."
 }
 
-# Main script execution
+# Function to set up the systemd service
+setup_service() {
+    echo "Setting up systemd service..."
+    cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=V2Ray GUI Backend
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$PYTHON_BIN $INSTALL_DIR/app.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable v2ray_gui
+    systemctl start v2ray_gui
+    echo "Systemd service set up and started."
+}
+
+# Function to configure Nginx
+configure_nginx() {
+    echo "Configuring Nginx..."
+    cat > /etc/nginx/sites-available/v2ray_gui <<EOF
+server {
+    listen 80;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    }
+}
+EOF
+
+    ln -sf /etc/nginx/sites-available/v2ray_gui /etc/nginx/sites-enabled/v2ray_gui
+    systemctl restart nginx
+    echo "Nginx configured."
+}
+
+# Execution flow
 install_prerequisites
-clone_repo
-generate_flask_app
+setup_application
+generate_backend
 generate_frontend
-create_service
+setup_service
 configure_nginx
 
-# Finish
-echo "Installation complete. Access the GUI at http://<your-server-ip>."
+# Completion message
+echo "Installation complete. Access the GUI at http://<your-server-ip>/"
