@@ -3,7 +3,7 @@
 # This script sets up the V2Ray GUI project and installs all necessary components
 
 # Constants
-REPO_URL="https://github.com/yourusername/v2ray-gui.git"
+REPO_URL="https://github.com/mrbtmn/v2ray-gui.git"
 INSTALL_DIR="/opt/v2ray_gui"
 PYTHON_BIN="python3"
 PIP_BIN="pip3"
